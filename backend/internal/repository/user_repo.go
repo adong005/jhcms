@@ -54,12 +54,31 @@ func (r *UserRepository) FindByID(id string) (*model.User, error) {
 	return &user, nil
 }
 
-// Create 创建用户
+// Create 创建用户，自动根据父节点构建物化路径。
 func (r *UserRepository) Create(user *model.User) error {
 	if user.ID == "" {
 		user.ID = ids.New()
 	}
-	return r.db.Create(user).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if user.Path == "" {
+			if user.IsAdmin || user.Role == "super_admin" {
+				user.Path = "/"
+			} else if user.ParentID != nil && *user.ParentID != "" {
+				var parent model.User
+				if err := tx.Select("id, path, role, is_admin").Where("id = ?", *user.ParentID).First(&parent).Error; err != nil {
+					return err
+				}
+				if parent.IsAdmin || parent.Role == "super_admin" {
+					user.Path = "/" + user.ID + "/"
+				} else {
+					user.Path = parent.Path + user.ID + "/"
+				}
+			} else {
+				user.Path = "/" + user.ID + "/"
+			}
+		}
+		return tx.Create(user).Error
+	})
 }
 
 // Update 更新用户
@@ -73,6 +92,22 @@ func (r *UserRepository) UpdateLastLogin(userID string) error {
 		Update("last_login_date", gorm.Expr("NOW()")).Error
 }
 
+// ListSubtree 查询 rootPath 子树下的所有用户（包含 root 本身）。
+func (r *UserRepository) ListSubtree(rootPath string, page, pageSize int, username string, status *int) ([]model.User, int64, error) {
+	query := r.db.Model(&model.User{}).Where("path LIKE ?", rootPath+"%")
+	if username != "" {
+		query = query.Where("username LIKE ?", "%"+username+"%")
+	}
+	if status != nil {
+		query = query.Where("status = ?", int8(*status))
+	}
+	var total int64
+	query.Count(&total)
+	var users []model.User
+	err := query.Offset((page - 1) * pageSize).Limit(pageSize).Order("path ASC").Find(&users).Error
+	return users, total, err
+}
+
 // List 获取用户列表（带租户隔离）
 func (r *UserRepository) List(tenantID, role, currentUserID string, page, pageSize int, username string, status *int) ([]model.User, int64, error) {
 	query := r.db.Model(&model.User{})
@@ -80,7 +115,12 @@ func (r *UserRepository) List(tenantID, role, currentUserID string, page, pageSi
 	if role == "super_admin" {
 		// 平台超级管理员可查看全部用户，不按租户过滤。
 	} else if currentUserID != "" {
-		query = query.Where("id = ? OR created_by = ?", currentUserID, currentUserID)
+		var cur model.User
+		if err := r.db.Select("id, path, role, is_admin").Where("id = ?", currentUserID).First(&cur).Error; err == nil && cur.Path != "" && cur.Path != "/" {
+			query = query.Where("path LIKE ?", cur.Path+"%")
+		} else {
+			query = query.Where("id = ? OR created_by = ?", currentUserID, currentUserID)
+		}
 	}
 
 	if username != "" {
@@ -134,7 +174,7 @@ func (r *UserRepository) GetAccessCodesByUser(userID string, role string) ([]str
 	}
 
 	var user model.User
-	if err := r.db.Select("id, role, parent_id, is_admin").Where("id = ?", userID).First(&user).Error; err != nil {
+	if err := r.db.Select("id, role, parent_id, is_admin, path").Where("id = ?", userID).First(&user).Error; err != nil {
 		return nil, err
 	}
 	tenantID := user.EffectiveTenantID()

@@ -2,6 +2,7 @@ package model
 
 import (
 	"adcms-backend/internal/pkg/ids"
+	"strings"
 	"time"
 )
 
@@ -29,6 +30,7 @@ type User struct {
 	Status                int8       `gorm:"default:1" json:"status"`
 	LastLoginDate         *time.Time `json:"lastLoginDate,omitempty"`
 	ExpireDate            *time.Time `json:"expireDate,omitempty"`
+	Path                  string     `gorm:"type:varchar(512);not null;default:'';index" json:"path,omitempty"`
 
 	CreatorOptional
 	AuditModel
@@ -38,10 +40,32 @@ func (User) TableName() string {
 	return "users"
 }
 
-// EffectiveTenantID 按用户自身关系推导租户ID，不再依赖 users.tenant_id。
+// TenantID 从 path 提取顶层租户 ID（path 第一段），super_admin 返回 DefaultTenantUUID。
+// path 格式：'/' (super_admin) | '/adminId/' | '/adminId/agentId/userId/'
+func (u User) TenantID() string {
+	if u.IsAdmin || u.Role == "super_admin" {
+		return ids.DefaultTenantUUID
+	}
+	if u.Path == "" {
+		return u.EffectiveTenantID()
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) > 0 && parts[0] != "" {
+		return parts[0]
+	}
+	return ids.DefaultTenantUUID
+}
+
+// EffectiveTenantID 按用户自身关系推导租户ID。优先使用 path，回退到 parent_id。
 func (u User) EffectiveTenantID() string {
 	if u.IsAdmin || u.Role == "super_admin" {
 		return ids.DefaultTenantUUID
+	}
+	if u.Path != "" {
+		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+		if len(parts) > 0 && parts[0] != "" {
+			return parts[0]
+		}
 	}
 	if u.Role == "admin" {
 		return u.ID
