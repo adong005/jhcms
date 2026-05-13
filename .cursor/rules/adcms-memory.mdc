@@ -5,26 +5,34 @@ alwaysApply: true
 
 # ADCMS 项目记忆
 
-- `admin`：vben admin pro 的前端代码（前端端口 `5666`）
+- `admin`：vben admin pro 的前端代码（本地开发端口 `5666`）
 - `backend`：后端代码与运行脚本所在目录
 
-## 后端构建与启动
+## 生产部署（宝塔）
+
+- **后端**：由宝塔托管运行；监听端口以 `backend/.env` 中 **`SERVER_PORT`** 为准（当前为 **`8080`**）
+- **后端可执行文件**：`/www/wwwroot/jhcms/backend/adcms-server`
+- **后端配置**：`/www/wwwroot/jhcms/backend/.env`
+- **前端静态站点**：宝塔「静态网站」站点根目录指向编译产物 **`/www/wwwroot/jhcms/admin/apps/web-antd/dist`**（需先 `pnpm build`）
+- **数据库**：本机 MySQL；库名 **`jhcms`**；主机/用户/口令等以 **`backend/.env`**（`DB_*`）为准，勿在规则或仓库中重复明文口令
+
+## 后端构建与启动（仓库脚本 / 本地调试）
 
 - `backend/build.sh`：构造 Linux 运行环境（生成后端可执行文件等）
 - `backend/start.sh`：停止旧进程并启动新进程
-  - 会检查并强制清理占用 `8081` 端口的旧进程（`lsof -ti:8081` + `kill -9`）
+  - 会检查并强制清理占用 **`8081`** 端口的旧进程（与脚本内写死的健康检查端口一致；若 `.env` 使用其他端口，应以 `.env` / 宝塔实际端口为准）
   - 启动命令：`nohup ./adcms-server > logs/server.log 2>&1 &`
-  - 健康检查：请求 `http://localhost:8081/health`
+  - 健康检查（脚本默认）：`http://localhost:8081/health`
   - 日志：`backend/logs/server.log`
 
 ## 端口约定
 
-- 前端（admin）：`5666`
-- 后端（backend）：`8081`
+- 前端本地开发（admin）：`5666`
+- 后端生产（当前 `.env`）：`8080`；`start.sh` 脚本内默认按 `8081` 清理与健康检查
 
 操作的时候注意不要结束 node 进程防止连接断开
 
-后端的启动命令 cd backend && ./build.sh && ./start.sh
+本地调试后端：`cd backend && ./build.sh && ./start.sh`（端口与 `.env` 不一致时需自行核对）
 
 
 ## 用户与权限约定

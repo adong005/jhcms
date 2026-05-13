@@ -55,13 +55,9 @@ func registerCRUDRoutes(group *gin.RouterGroup, handlers CRUDHandlers) {
 func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	// 初始化 Repository
 	userRepo := repository.NewUserRepository(db)
-	infoRepo := repository.NewInfoRepository(db)
 	menuRepo := repository.NewMenuRepository(db)
 	permissionRepo := repository.NewPermissionRepository(db)
 	roleRepo := repository.NewRoleRepository(db)
-	infoCategoryRepo := repository.NewInfoCategoryRepository(db)
-	siteGroupRepo := repository.NewSiteGroupRepository(db)
-	formRepo := repository.NewFormRepository(db)
 	systemLogRepo := repository.NewSystemLogRepository(db)
 
 	// 初始化 Service
@@ -99,15 +95,10 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 
 	// 初始化 Handler
 	authHandler := handler.NewAuthHandler(authService)
-	siteConfigHandler := handler.NewSiteConfigHandler(userRepo)
 	menuHandler := handler.NewMenuHandler(menuRepo)
 	permissionHandler := handler.NewPermissionHandler(permissionRepo)
-	infoHandler := handler.NewInfoHandler(infoRepo, userRepo, infoCategoryRepo)
-	infoCategoryHandler := handler.NewInfoCategoryHandler(infoCategoryRepo, userRepo)
 	userHandler := handler.NewUserHandler(userRepo)
 	roleHandler := handler.NewRoleHandler(roleRepo)
-	siteGroupHandler := handler.NewSiteGroupHandler(siteGroupRepo)
-	formManageHandler := handler.NewFormManageHandler(formRepo)
 	systemLogHandler := handler.NewSystemLogHandler(systemLogRepo)
 
 	// 健康检查
@@ -210,62 +201,6 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 			})
 			roles.GET("/permission/:id", roleHandler.GetRolePermission)
 			roles.POST("/permission", withPermission("system:role:permission", roleHandler.UpdateRolePermission))
-		}
-
-		// 信息管理
-		infos := authorized.Group("/info")
-		{
-			registerCRUDRoutes(infos, CRUDHandlers{
-				List:        infoHandler.GetInfoList,
-				Create:      infoHandler.CreateInfo,
-				Update:      infoHandler.UpdateInfoByBody,
-				Delete:      infoHandler.DeleteInfoByBody,
-				Status:      infoHandler.UpdateInfoStatus,
-				BatchDelete: infoHandler.BatchDeleteInfo,
-			})
-			infoCategory := infos.Group("/category")
-			{
-				registerCRUDRoutes(infoCategory, CRUDHandlers{
-					List:        infoCategoryHandler.GetCategoryList,
-					Create:      infoCategoryHandler.CreateCategory,
-					Update:      infoCategoryHandler.UpdateCategory,
-					Delete:      infoCategoryHandler.DeleteCategory,
-					Status:      infoCategoryHandler.UpdateCategoryStatus,
-					BatchDelete: infoCategoryHandler.BatchDeleteCategory,
-				})
-			}
-			infos.GET("/detail/:id", infoHandler.GetInfoDetailByPath)
-		}
-
-		// 站群管理
-		siteGroups := authorized.Group("/site-group")
-		{
-			registerCRUDRoutes(siteGroups, CRUDHandlers{
-				List:        siteGroupHandler.GetSiteGroupList,
-				BatchDelete: siteGroupHandler.BatchDeleteSiteGroup,
-			})
-			siteGroups.GET("/admins", siteGroupHandler.GetAdminOptions)
-			siteGroups.POST("/cities", siteGroupHandler.GetCityList)
-			siteGroups.POST("", siteGroupHandler.CreateSiteGroup)
-			siteGroups.PUT("/:id", siteGroupHandler.UpdateSiteGroup)
-			siteGroups.DELETE("/:id", siteGroupHandler.DeleteSiteGroup)
-		}
-
-		// 网站配置
-		siteConfig := authorized.Group("/site-config")
-		{
-			siteConfig.GET("", siteConfigHandler.GetSiteConfig)
-			siteConfig.POST("", siteConfigHandler.UpdateSiteConfig)
-			siteConfig.POST("/logo/upload", siteConfigHandler.UploadSiteLogo)
-		}
-
-		// 表单管理
-		forms := authorized.Group("/form-manage")
-		{
-			forms.POST("/list", formManageHandler.GetFormList)
-			forms.POST("/batch-delete", formManageHandler.BatchDeleteForm)
-			forms.DELETE("/:id", formManageHandler.DeleteForm)
-			forms.POST("/export", formManageHandler.ExportForm)
 		}
 
 		// 系统日志

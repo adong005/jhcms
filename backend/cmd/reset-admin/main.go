@@ -26,10 +26,6 @@ func autoMigrate(db *gorm.DB) error {
 		&model.Role{},
 		&model.RolePermission{},
 		&model.Menu{},
-		&model.Info{},
-		&model.InfoCategory{},
-		&model.SiteGroup{},
-		&model.Form{},
 		&model.SystemLog{},
 	)
 }

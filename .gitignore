@@ -1,0 +1,14 @@
+# pnpm store
+admin/.pnpm-store/
+
+# backend compiled binary & env
+backend/adcms-server
+backend/.env
+backend/backup/
+
+# node_modules (admin dependencies managed separately)
+admin/node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
