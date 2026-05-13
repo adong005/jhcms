@@ -78,7 +78,7 @@ func (h *MenuHandler) buildMenuTree(menus []model.Menu) []map[string]interface{}
 	var tree []map[string]interface{}
 
 	for _, menu := range menus {
-		if menu.ParentIDMenu == nil {
+		if menu.ParentID == nil {
 			menuItem := h.convertMenuToNavigationFormat(&menu, menuMap)
 			tree = append(tree, menuItem)
 		}
@@ -112,7 +112,7 @@ func (h *MenuHandler) convertMenuToNavigationFormat(menu *model.Menu, menuMap ma
 
 	var children []map[string]interface{}
 	for _, m := range menuMap {
-		if m.ParentIDMenu != nil && *m.ParentIDMenu == menu.ID {
+		if m.ParentID != nil && *m.ParentID == menu.ID {
 			childItem := map[string]interface{}{
 				"name":      m.Name,
 				"path":      m.Path,
@@ -154,7 +154,7 @@ func (h *MenuHandler) convertMenusToListFormat(menus []model.Menu) []map[string]
 			"icon":           menu.Icon,
 			"permissionCode": menu.PermissionCode,
 			"component":      menu.Component,
-			"parentId":       menu.ParentIDMenu,
+			"parentId":       menu.ParentID,
 			"order":          menu.SortOrder,
 			"isShow":         menu.IsShow,
 			"status":         menu.Status,
@@ -170,16 +170,16 @@ func (h *MenuHandler) convertMenusToListFormat(menus []model.Menu) []map[string]
 
 func (h *MenuHandler) CreateMenu(c *gin.Context) {
 	var req struct {
-		Name           string  `json:"name" binding:"required"`
-		Path           string  `json:"path"`
-		Type           string  `json:"type"`
-		Icon           string  `json:"icon"`
-		PermissionCode string  `json:"permissionCode"`
-		Component      string  `json:"component"`
-		ParentID       *string `json:"parentId"`
+		Name           string      `json:"name" binding:"required"`
+		Path           string      `json:"path"`
+		Type           string      `json:"type"`
+		Icon           string      `json:"icon"`
+		PermissionCode string      `json:"permissionCode"`
+		Component      string      `json:"component"`
+		ParentID       *string     `json:"parentId"`
 		Order          interface{} `json:"order"`
-		IsShow         *int8   `json:"isShow"`
-		Status         *int8   `json:"status"`
+		IsShow         *int8       `json:"isShow"`
+		Status         *int8       `json:"status"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, "请求参数错误")
@@ -197,7 +197,7 @@ func (h *MenuHandler) CreateMenu(c *gin.Context) {
 		Icon:           req.Icon,
 		PermissionCode: req.PermissionCode,
 		Component:      req.Component,
-		ParentIDMenu:   req.ParentID,
+		ParentID:       req.ParentID,
 		SortOrder:      0,
 		IsShow:         1,
 		Status:         1,
@@ -228,17 +228,17 @@ func (h *MenuHandler) CreateMenu(c *gin.Context) {
 
 func (h *MenuHandler) UpdateMenu(c *gin.Context) {
 	var req struct {
-		ID             string  `json:"id" binding:"required"`
-		Name           string  `json:"name"`
-		Path           string  `json:"path"`
-		Type           string  `json:"type"`
-		Icon           string  `json:"icon"`
-		PermissionCode string  `json:"permissionCode"`
-		Component      string  `json:"component"`
-		ParentID       *string `json:"parentId"`
+		ID             string      `json:"id" binding:"required"`
+		Name           string      `json:"name"`
+		Path           string      `json:"path"`
+		Type           string      `json:"type"`
+		Icon           string      `json:"icon"`
+		PermissionCode string      `json:"permissionCode"`
+		Component      string      `json:"component"`
+		ParentID       *string     `json:"parentId"`
 		Order          interface{} `json:"order"`
-		IsShow         *int8   `json:"isShow"`
-		Status         *int8   `json:"status"`
+		IsShow         *int8       `json:"isShow"`
+		Status         *int8       `json:"status"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, "请求参数错误")
@@ -279,7 +279,7 @@ func (h *MenuHandler) UpdateMenu(c *gin.Context) {
 		menu.Component = ""
 	}
 	if req.ParentID != nil {
-		menu.ParentIDMenu = req.ParentID
+		menu.ParentID = req.ParentID
 	}
 	if order != nil {
 		menu.SortOrder = *order

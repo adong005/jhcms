@@ -1,9 +1,10 @@
 package model
 
 type Menu struct {
-	ID             string  `gorm:"type:char(36);primaryKey" json:"id"`
+	ID string `gorm:"type:char(36);primaryKey" json:"id"`
 	TenantScoped
-	ParentIDMenu   *string `gorm:"type:char(36);index" json:"parentIdMenu,omitempty"`
+	ParentID       *string `gorm:"type:char(36);column:parent_id;index" json:"parentId,omitempty"`
+	PathChain      string  `gorm:"type:varchar(512);not null;default:'';index:idx_menus_path_chain" json:"pathChain,omitempty"`
 	Name           string  `gorm:"type:varchar(100);not null" json:"name"`
 	Path           string  `gorm:"type:varchar(255)" json:"path"`
 	Component      string  `gorm:"type:varchar(255)" json:"component"`

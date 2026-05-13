@@ -254,7 +254,7 @@ func seedDefaultMenus(db *gorm.DB) error {
 			SortOrder:    s.SortOrder,
 			IsShow:       1,
 			Status:       1,
-			ParentIDMenu: s.ParentID, //nolint
+			ParentID:     s.ParentID,
 		}
 		if err := db.Create(&m).Error; err != nil {
 			return err

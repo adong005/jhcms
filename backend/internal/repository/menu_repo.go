@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"strings"
+
 	"adcms-backend/internal/model"
 	"adcms-backend/internal/pkg/ids"
 
@@ -53,9 +55,9 @@ func (r *MenuRepository) GetMenusByParentID(parentID *string) ([]model.Menu, err
 	query := r.db.Where("status = ?", 1)
 
 	if parentID == nil {
-		query = query.Where("parent_id_menu IS NULL")
+		query = query.Where("parent_id IS NULL")
 	} else {
-		query = query.Where("parent_id_menu = ?", *parentID)
+		query = query.Where("parent_id = ?", *parentID)
 	}
 
 	err := query.Order("sort_order ASC, id ASC").Find(&menus).Error
@@ -125,15 +127,75 @@ func (r *MenuRepository) List(tenantID string, page, pageSize int, name, menuTyp
 	return menus, total, nil
 }
 
+// buildPathChain 根据父节点构建 path_chain。
+func buildPathChain(tx *gorm.DB, menuID string, parentID *string) (string, error) {
+	if parentID == nil || *parentID == "" {
+		return "/" + menuID + "/", nil
+	}
+	var parent model.Menu
+	if err := tx.Select("id, path_chain").Where("id = ?", *parentID).First(&parent).Error; err != nil {
+		return "", err
+	}
+	if parent.PathChain == "" {
+		parent.PathChain = "/" + parent.ID + "/"
+	}
+	return parent.PathChain + menuID + "/", nil
+}
+
 func (r *MenuRepository) Create(menu *model.Menu) error {
 	if menu.ID == "" {
 		menu.ID = ids.New()
 	}
-	return r.db.Create(menu).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if menu.PathChain == "" {
+			chain, err := buildPathChain(tx, menu.ID, menu.ParentID)
+			if err != nil {
+				return err
+			}
+			menu.PathChain = chain
+		}
+		return tx.Create(menu).Error
+	})
 }
 
 func (r *MenuRepository) Update(menu *model.Menu) error {
-	return r.db.Save(menu).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var old model.Menu
+		if err := tx.Select("id, parent_id, path_chain").Where("id = ?", menu.ID).First(&old).Error; err != nil {
+			return err
+		}
+		oldParentID := ""
+		if old.ParentID != nil {
+			oldParentID = *old.ParentID
+		}
+		newParentID := ""
+		if menu.ParentID != nil {
+			newParentID = *menu.ParentID
+		}
+		if oldParentID != newParentID {
+			chain, err := buildPathChain(tx, menu.ID, menu.ParentID)
+			if err != nil {
+				return err
+			}
+			newChain := chain
+			oldChain := old.PathChain
+			menu.PathChain = newChain
+			// 级联更新所有子菜单的 path_chain 前缀。
+			if oldChain != "" {
+				var descendants []model.Menu
+				if err := tx.Where("path_chain LIKE ? AND id != ?", oldChain+"%", menu.ID).Find(&descendants).Error; err != nil {
+					return err
+				}
+				for i := range descendants {
+					updated := strings.Replace(descendants[i].PathChain, oldChain, newChain, 1)
+					if err := tx.Model(&model.Menu{}).Where("id = ?", descendants[i].ID).Update("path_chain", updated).Error; err != nil {
+						return err
+					}
+				}
+			}
+		}
+		return tx.Save(menu).Error
+	})
 }
 
 func (r *MenuRepository) UpdateStatus(id string, tenantID string, status int8) error {
