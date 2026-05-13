@@ -8,6 +8,7 @@ import (
 	"adcms-backend/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -54,6 +55,7 @@ func registerCRUDRoutes(group *gin.RouterGroup, handlers CRUDHandlers) {
 // Setup 设置路由
 func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	middleware.SetTenantDB(db)
+	middleware.StartLogConsumer(db, zap.L())
 
 	// 初始化 Repository
 	userRepo := repository.NewUserRepository(db)
@@ -209,6 +211,8 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 		logs := authorized.Group("/system-logs")
 		{
 			logs.POST("/list", withPermission("log:list", systemLogHandler.GetSystemLogList))
+			logs.POST("/export", withPermission("log:list", systemLogHandler.ExportSystemLog))
+			logs.POST("/purge", withPermission("log:clear", systemLogHandler.PurgeOldLogs))
 			logs.POST("/batch-delete", withPermission("log:delete", systemLogHandler.BatchDeleteSystemLog))
 			logs.DELETE("/:id", withPermission("log:delete", systemLogHandler.DeleteSystemLog))
 			logs.POST("/clear", withPermission("log:clear", systemLogHandler.ClearSystemLog))

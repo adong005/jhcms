@@ -1,9 +1,9 @@
 package middleware
 
 import (
-	"bytes"
 	"adcms-backend/internal/model"
 	"adcms-backend/internal/pkg/ids"
+	"bytes"
 	"encoding/json"
 	"io"
 	"sort"
@@ -12,8 +12,25 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
+
+// logCh 是操作日志异步写库的缓冲通道。
+var logCh = make(chan *model.SystemLog, 1024)
+
+// StartLogConsumer 启动后台 goroutine 消费日志通道，进程级单例，应在服务启动时调用。
+func StartLogConsumer(db *gorm.DB, logger *zap.Logger) {
+	go func() {
+		for item := range logCh {
+			if err := db.Create(item).Error; err != nil {
+				if logger != nil {
+					logger.Error("operation log write failed", zap.Error(err), zap.String("id", item.ID))
+				}
+			}
+		}
+	}()
+}
 
 func resolveAction(method, path string) string {
 	p := strings.ToLower(path)
@@ -30,6 +47,8 @@ func resolveAction(method, path string) string {
 		return "delete"
 	case strings.Contains(p, "/export"):
 		return "export"
+	case strings.Contains(p, "/purge"), strings.Contains(p, "/clear"):
+		return "delete"
 	case strings.Contains(p, "/list"), method == "GET":
 		return "query"
 	default:
@@ -110,9 +129,31 @@ func maskSensitivePayload(raw string) string {
 	return string(masked)
 }
 
-// OperationLogMiddleware 将已登录用户的 API 操作落库到 system_logs。
-func OperationLogMiddleware(db *gorm.DB) gin.HandlerFunc {
+func maskErrorMsg(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	if len(raw) > 500 {
+		raw = raw[:500] + "...(truncated)"
+	}
+	for _, kw := range []string{"password", "token", "secret", "authorization"} {
+		raw = strings.ReplaceAll(strings.ToLower(raw), kw, "***")
+	}
+	return strings.TrimSpace(strings.ReplaceAll(raw, "\n", " | "))
+}
+
+// OperationLogMiddleware 将已登录用户的 API 操作异步落库到 system_logs。
+// 依赖 StartLogConsumer 已在启动时调用。
+func OperationLogMiddleware(_ *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 注入 request_id
+		reqID := c.GetHeader("X-Request-Id")
+		if reqID == "" || !ids.Valid(reqID) {
+			reqID = ids.New()
+		}
+		c.Set("request_id", reqID)
+		c.Header("X-Request-Id", reqID)
+
 		start := time.Now()
 		requestPayload := ""
 		if c.Request != nil && c.Request.Body != nil {
@@ -133,8 +174,8 @@ func OperationLogMiddleware(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		// 排除健康检查和日志自身写操作，避免噪音。
-		if strings.HasPrefix(path, "/api/system-logs") || strings.HasPrefix(path, "/health") {
+		// 排除健康检查，避免噪音。日志自身的操作（delete/clear/purge）允许被记录。
+		if strings.HasPrefix(path, "/health") {
 			return
 		}
 
@@ -152,6 +193,11 @@ func OperationLogMiddleware(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
+		userPath := ""
+		if pv, ok := c.Get("user_path"); ok {
+			userPath, _ = pv.(string)
+		}
+
 		var parentID *string
 		if pidVal, ok := c.Get("parent_id"); ok {
 			if pid, ok2 := pidVal.(string); ok2 && pid != "" {
@@ -164,25 +210,38 @@ func OperationLogMiddleware(db *gorm.DB) gin.HandlerFunc {
 			status = "fail"
 		}
 
-		errorMsg := c.Errors.String()
+		errorMsg := maskErrorMsg(c.Errors.String())
 		if errorMsg == "" && status == "fail" {
 			errorMsg = strconv.Itoa(c.Writer.Status())
 		}
 
-		_ = db.Create(&model.SystemLog{
+		entry := &model.SystemLog{
 			ID:          ids.New(),
+			RequestID:   reqID,
 			TenantID:    tenantID,
+			UserID:      userID,
+			Path:        userPath,
 			Username:    username,
 			Action:      resolveAction(c.Request.Method, path),
 			Module:      resolveModule(path),
 			Description: c.Request.Method + " " + path,
 			IP:          c.ClientIP(),
+			Method:      c.Request.Method,
+			URL:         path,
+			UserAgent:   c.Request.UserAgent(),
 			Status:      status,
+			LogType:     "api",
+			StatusCode:  c.Writer.Status(),
 			Duration:    int(time.Since(start).Milliseconds()),
-			ErrorMsg:    strings.TrimSpace(strings.ReplaceAll(errorMsg, "\n", " | ")),
+			ErrorMsg:    errorMsg,
 			RequestJSON: requestPayload,
 			ParentID:    parentID,
-		}).Error
+		}
+
+		// 非阻塞投递，通道满时丢弃（操作日志允许少量丢失，不影响主流程）。
+		select {
+		case logCh <- entry:
+		default:
+		}
 	}
 }
-

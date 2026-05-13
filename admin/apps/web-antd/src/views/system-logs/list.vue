@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { VxeGridListeners } from '#/adapter/vxe-table';
-import { computed, onMounted, ref } from 'vue';
-import { Button, message, Modal, Tag } from 'ant-design-vue';
+import { computed, h, onMounted, ref } from 'vue';
+import { Button, Descriptions, DescriptionsItem, InputNumber, message, Modal, Tag } from 'ant-design-vue';
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getLogListApi, deleteLogApi, batchDeleteLogApi, clearLogsApi } from '#/api/log';
+import { batchDeleteLogApi, clearLogsApi, deleteLogApi, exportLogsApi, getLogListApi, purgeOldLogsApi } from '#/api/log';
 import type { LogApi } from '#/api/log';
 import { getUserListApi } from '#/api/user';
 import { useUserStore } from '@vben/stores';
@@ -121,13 +121,28 @@ const formOptions: any = {
       label: '状态',
     },
     {
-      component: 'DatePicker',
+      component: 'RangePicker',
       componentProps: {
-        placeholder: '请选择日期',
+        allowClear: true,
+        showTime: false,
         style: { width: '100%' },
+        placeholder: ['开始日期', '结束日期'],
+        valueFormat: 'YYYY-MM-DD',
       },
-      fieldName: 'date',
+      fieldName: 'dateRange',
       label: '操作日期',
+    },
+    {
+      component: 'Input',
+      componentProps: { placeholder: '请输入模块名', allowClear: true },
+      fieldName: 'module',
+      label: '操作模块',
+    },
+    {
+      component: 'Input',
+      componentProps: { placeholder: '请输入IP', allowClear: true },
+      fieldName: 'ip',
+      label: 'IP地址',
     },
   ],
   showCollapseButton: true,
@@ -232,11 +247,16 @@ const gridOptions: any = {
   proxyConfig: {
     ajax: {
       query: async ({ page }: any, formValues: any) => {
-        const payload = { ...formValues };
+        const payload: any = { ...formValues };
         if (isSuperAdmin.value) {
           payload.usernames = selectedUsernames.value;
           delete payload.username;
         }
+        if (Array.isArray(payload.dateRange) && payload.dateRange.length === 2) {
+          payload.startTime = payload.dateRange[0];
+          payload.endTime = payload.dateRange[1];
+        }
+        delete payload.dateRange;
         const resp = await getLogListApi({
           page: page.currentPage,
           pageSize: page.pageSize,
@@ -288,20 +308,27 @@ onMounted(async () => {
 // 操作方法
 function handleView(record: LogRecord) {
   const statusText = record.status === 'success' ? '成功' : '失败';
-  const errorInfo = record.errorMsg ? `\n错误信息：${record.errorMsg}` : '';
-  const requestInfo = record.requestJson ? `\n请求JSON：${record.requestJson}` : '';
-
+  let prettyJson = '';
+  if (record.requestJson) {
+    try { prettyJson = JSON.stringify(JSON.parse(record.requestJson), null, 2); } catch { prettyJson = record.requestJson; }
+  }
   Modal.info({
     title: '日志详情',
-    width: 600,
-    content: `操作用户：${record.username}
-操作类型：${getActionText(record.action)}
-操作模块：${record.module}
-操作描述：${record.description}
-IP地址：${record.ip}
-状态：${statusText}
-耗时：${record.duration}ms
-操作时间：${record.createTime}${errorInfo}${requestInfo}`,
+    width: 680,
+    content: h(Descriptions, { bordered: true, size: 'small', column: 2 }, {
+      default: () => [
+        h(DescriptionsItem, { label: '操作用户', span: 1 }, () => record.username),
+        h(DescriptionsItem, { label: '操作类型', span: 1 }, () => getActionText(record.action)),
+        h(DescriptionsItem, { label: '操作模块', span: 1 }, () => record.module),
+        h(DescriptionsItem, { label: '状态', span: 1 }, () => statusText),
+        h(DescriptionsItem, { label: 'IP地址', span: 1 }, () => record.ip),
+        h(DescriptionsItem, { label: '耗时', span: 1 }, () => `${record.duration}ms`),
+        h(DescriptionsItem, { label: '操作时间', span: 2 }, () => record.createTime),
+        h(DescriptionsItem, { label: '操作描述', span: 2 }, () => record.description),
+        ...(record.errorMsg ? [h(DescriptionsItem, { label: '错误信息', span: 2 }, () => record.errorMsg)] : []),
+        ...(prettyJson ? [h(DescriptionsItem, { label: '请求参数', span: 2 }, () => h('pre', { style: 'max-height:300px;overflow:auto;margin:0;font-size:12px;background:#f5f5f5;padding:8px;border-radius:4px;white-space:pre-wrap;word-break:break-all' }, prettyJson))] : []),
+      ],
+    }),
   });
 }
 
@@ -345,21 +372,80 @@ function handleBatchDelete() {
 }
 
 function handleClearLogs() {
+  const isSuper = isSuperAdmin.value;
   Modal.confirm({
     title: '确认清空',
-    content: '确定要清空所有日志吗？此操作不可恢复！',
+    content: isSuper
+      ? '确定要清空【全平台】所有日志吗？此操作不可恢复！'
+      : '确定要清空当前租户的所有日志吗？此操作不可恢复！',
     okText: '确定清空',
     okType: 'danger',
     onOk: async () => {
       try {
-        await clearLogsApi();
+        await clearLogsApi(isSuper);
         message.success('清空日志成功');
         gridApi.reload();
-      } catch (error) {
+      } catch {
         message.error('清空日志失败');
       }
     },
   });
+}
+
+const purgeDays = ref(90);
+
+function handlePurge() {
+  Modal.confirm({
+    title: '清理历史日志',
+    content: () =>
+      h('div', { style: 'display:flex;align-items:center;gap:8px' }, [
+        h('span', '删除'),
+        h(InputNumber, {
+          min: 1,
+          max: 3650,
+          value: purgeDays.value,
+          style: 'width:80px',
+          onChange: (v: number) => { purgeDays.value = v; },
+        }),
+        h('span', '天前的日志（不可恢复）'),
+      ]),
+    okText: '确认清理',
+    okType: 'danger',
+    onOk: async () => {
+      try {
+        const result: any = await purgeOldLogsApi(purgeDays.value);
+        message.success(`清理完成，共删除 ${result?.deleted ?? 0} 条`);
+        gridApi.reload();
+      } catch {
+        message.error('清理失败');
+      }
+    },
+  });
+}
+
+async function handleExport() {
+  try {
+    const formValues: any = gridApi.formApi?.getValues?.() ?? {};
+    const payload: any = { ...formValues };
+    if (isSuperAdmin.value) {
+      payload.usernames = selectedUsernames.value;
+      delete payload.username;
+    }
+    if (Array.isArray(payload.dateRange) && payload.dateRange.length === 2) {
+      payload.startTime = payload.dateRange[0];
+      payload.endTime = payload.dateRange[1];
+    }
+    delete payload.dateRange;
+    const blob: any = await exportLogsApi(payload);
+    const url = URL.createObjectURL(new Blob([blob], { type: 'text/csv;charset=utf-8;' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `system_logs_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch {
+    message.error('导出失败');
+  }
 }
 
 // 获取操作类型标签颜色
@@ -396,6 +482,14 @@ function getActionText(action: string) {
     <Grid>
       <!-- 工具栏按钮 -->
       <template #toolbar-tools>
+        <Button @click="handleExport">
+          <template #icon><span class="i-ant-design:download-outlined" /></template>
+          导出CSV
+        </Button>
+        <Button @click="handlePurge">
+          <template #icon><span class="i-ant-design:history-outlined" /></template>
+          清理历史
+        </Button>
         <Button danger @click="handleBatchDelete">
           <template #icon><span class="i-ant-design:delete-outlined" /></template>
           批量删除
