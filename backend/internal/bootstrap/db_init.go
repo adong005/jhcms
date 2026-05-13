@@ -35,6 +35,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.RolePermission{},
 		&model.Menu{},
 		&model.SystemLog{},
+		&model.TenantSiteConfig{},
 	); err != nil {
 		return err
 	}
@@ -89,6 +90,7 @@ func resetAllTables(db *gorm.DB) error {
 		&model.RolePermission{},
 		&model.SystemLog{},
 		&model.Menu{},
+		&model.TenantSiteConfig{},
 		&model.User{},
 		&model.Role{},
 		&model.Permission{},
@@ -263,87 +265,22 @@ func seedDefaultMenus(db *gorm.DB) error {
 
 func seedDefaultAdmin(db *gorm.DB) error {
 	type userSeed struct {
-		Username       string
-		PasswordPlain  string
-		IsAdmin        bool
-		RealName       string
-		NickName       string
-		Email          string
-		Phone          string
-		Role           string
-		DataScope      string
-		Title          string
-		Keywords       string
-		Description    string
-		Domain         string
-		ICPCode        string
-		ContactPhone   string
-		ContactAddress string
-		ContactEmail   string
-		Status         int8
+		Username      string
+		PasswordPlain string
+		IsAdmin       bool
+		RealName      string
+		NickName      string
+		Email         string
+		Phone         string
+		Role          string
+		DataScope     string
+		Status        int8
 	}
 
 	seeds := []userSeed{
-		{
-			Username:       "admin",
-			PasswordPlain:  "admin123",
-			IsAdmin:        true,
-			RealName:       "超级管理员",
-			NickName:       "Admin",
-			Email:          "admin@adcms.com",
-			Phone:          "13800000001",
-			Role:           "super_admin",
-			DataScope:      "TENANT_ALL",
-			Title:          "ADCMS 管理后台",
-			Keywords:       "adcms,cms,admin",
-			Description:    "ADCMS 默认站点配置（超级管理员）",
-			Domain:         "admin.adcms.local",
-			ICPCode:        "京ICP备2026000001号",
-			ContactPhone:   "010-88886666",
-			ContactAddress: "北京市朝阳区示例路 1 号",
-			ContactEmail:   "support@adcms.com",
-			Status:         1,
-		},
-		{
-			Username:       "tenant_admin",
-			PasswordPlain:  "admin123",
-			IsAdmin:        false,
-			RealName:       "租户管理员",
-			NickName:       "TenantAdmin",
-			Email:          "tenant-admin@adcms.com",
-			Phone:          "13800000002",
-			Role:           "admin",
-			DataScope:      "TENANT_ALL",
-			Title:          "默认租户站点",
-			Keywords:       "tenant,site,adcms",
-			Description:    "默认租户网站配置",
-			Domain:         "tenant.adcms.local",
-			ICPCode:        "京ICP备2026000002号",
-			ContactPhone:   "010-66668888",
-			ContactAddress: "北京市海淀区示例园区 8 号",
-			ContactEmail:   "tenant@adcms.com",
-			Status:         1,
-		},
-		{
-			Username:       "demo_user",
-			PasswordPlain:  "admin123",
-			IsAdmin:        false,
-			RealName:       "演示用户",
-			NickName:       "DemoUser",
-			Email:          "demo-user@adcms.com",
-			Phone:          "13800000003",
-			Role:           "user",
-			DataScope:      "SELF",
-			Title:          "",
-			Keywords:       "",
-			Description:    "",
-			Domain:         "",
-			ICPCode:        "",
-			ContactPhone:   "400-800-9000",
-			ContactAddress: "上海市浦东新区示例大道 9 号",
-			ContactEmail:   "demo@adcms.com",
-			Status:         1,
-		},
+		{Username: "admin", PasswordPlain: "admin123", IsAdmin: true, RealName: "超级管理员", NickName: "Admin", Email: "admin@adcms.com", Phone: "13800000001", Role: "super_admin", DataScope: "TENANT_ALL", Status: 1},
+		{Username: "tenant_admin", PasswordPlain: "admin123", IsAdmin: false, RealName: "租户管理员", NickName: "TenantAdmin", Email: "tenant-admin@adcms.com", Phone: "13800000002", Role: "admin", DataScope: "TENANT_ALL", Status: 1},
+		{Username: "demo_user", PasswordPlain: "admin123", IsAdmin: false, RealName: "演示用户", NickName: "DemoUser", Email: "demo-user@adcms.com", Phone: "13800000003", Role: "user", DataScope: "SELF", Status: 1},
 	}
 
 	for _, s := range seeds {
@@ -352,22 +289,14 @@ func seedDefaultAdmin(db *gorm.DB) error {
 		if err == nil {
 			// 已存在用户时补齐可展示的模拟字段，不覆盖历史密码。
 			updateData := map[string]interface{}{
-				"is_admin":        s.IsAdmin,
-				"real_name":       s.RealName,
-				"nick_name":       s.NickName,
-				"email":           s.Email,
-				"phone":           s.Phone,
-				"role":            s.Role,
-				"data_scope":      s.DataScope,
-				"status":          s.Status,
-				"title":           s.Title,
-				"keywords":        s.Keywords,
-				"description":     s.Description,
-				"domain":          s.Domain,
-				"icp_code":        s.ICPCode,
-				"contact_phone":   s.ContactPhone,
-				"contact_address": s.ContactAddress,
-				"contact_email":   s.ContactEmail,
+				"is_admin":   s.IsAdmin,
+				"real_name":  s.RealName,
+				"nick_name":  s.NickName,
+				"email":      s.Email,
+				"phone":      s.Phone,
+				"role":       s.Role,
+				"data_scope": s.DataScope,
+				"status":     s.Status,
 			}
 			if err := db.Model(&model.User{}).Where("id = ?", existing.ID).Updates(updateData).Error; err != nil {
 				return err
@@ -384,25 +313,17 @@ func seedDefaultAdmin(db *gorm.DB) error {
 		}
 
 		u := model.User{
-			ID:             ids.New(),
-			Username:       s.Username,
-			Password:       string(pwd),
-			IsAdmin:        s.IsAdmin,
-			RealName:       s.RealName,
-			NickName:       s.NickName,
-			Email:          s.Email,
-			Phone:          s.Phone,
-			Role:           s.Role,
-			DataScope:      s.DataScope,
-			Status:         s.Status,
-			Title:          s.Title,
-			Keywords:       s.Keywords,
-			Description:    s.Description,
-			Domain:         s.Domain,
-			ICPCode:        s.ICPCode,
-			ContactPhone:   s.ContactPhone,
-			ContactAddress: s.ContactAddress,
-			ContactEmail:   s.ContactEmail,
+			ID:        ids.New(),
+			Username:  s.Username,
+			Password:  string(pwd),
+			IsAdmin:   s.IsAdmin,
+			RealName:  s.RealName,
+			NickName:  s.NickName,
+			Email:     s.Email,
+			Phone:     s.Phone,
+			Role:      s.Role,
+			DataScope: s.DataScope,
+			Status:    s.Status,
 		}
 		if s.Role == "user" {
 			// 默认普通用户归属 tenant_admin

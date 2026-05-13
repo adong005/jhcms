@@ -73,60 +73,6 @@ func (r *UserRepository) UpdateLastLogin(userID string) error {
 		Update("last_login_date", gorm.Expr("NOW()")).Error
 }
 
-// GetSiteConfigByUserID 根据用户ID获取网站配置（支持 super_admin 和 admin）
-func (r *UserRepository) GetSiteConfigByUserID(userID string) (*model.User, error) {
-	var user model.User
-	err := r.db.Where("id = ?", userID).First(&user).Error
-	if err != nil {
-		return nil, err
-	}
-	return &user, nil
-}
-
-// GetSiteConfigByTenantAdmin 租户内普通用户读取：取该租户下 role=admin 的站点配置
-func (r *UserRepository) GetSiteConfigByTenantAdmin(tenantID string) (*model.User, error) {
-	var user model.User
-	err := r.db.Where("id = ? AND role = ?", tenantID, "admin").First(&user).Error
-	if err != nil {
-		// 兼容历史数据：若 tenantID 指向普通用户，则回溯其 parent(admin)。
-		var member model.User
-		if e := r.db.Select("parent_id").Where("id = ?", tenantID).First(&member).Error; e == nil &&
-			member.ParentID != nil && *member.ParentID != "" {
-			return r.GetSiteConfigByUserID(*member.ParentID)
-		}
-		return nil, err
-	}
-	return r.GetSiteConfigByUserID(user.ID)
-}
-
-// UpdateSiteConfig 更新网站配置
-func (r *UserRepository) UpdateSiteConfig(
-	userID string,
-	title, keywords, description, domain, logo, icpCode, contactPhone, contactAddress, contactEmail string,
-) error {
-	return r.db.Model(&model.User{}).
-		Where("id = ?", userID).
-		Select("title", "keywords", "description", "domain", "logo", "icp_code", "contact_phone", "contact_address", "contact_email").
-		Updates(map[string]interface{}{
-			"title":           title,
-			"keywords":        keywords,
-			"description":     description,
-			"domain":          domain,
-			"logo":            logo,
-			"icp_code":        icpCode,
-			"contact_phone":   contactPhone,
-			"contact_address": contactAddress,
-			"contact_email":   contactEmail,
-		}).Error
-}
-
-// UpdateSiteLogo 更新网站 Logo 路径
-func (r *UserRepository) UpdateSiteLogo(userID, logo string) error {
-	return r.db.Model(&model.User{}).
-		Where("id = ?", userID).
-		Update("logo", logo).Error
-}
-
 // List 获取用户列表（带租户隔离）
 func (r *UserRepository) List(tenantID, role, currentUserID string, page, pageSize int, username string, status *int) ([]model.User, int64, error) {
 	query := r.db.Model(&model.User{})
