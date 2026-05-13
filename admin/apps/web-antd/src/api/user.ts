@@ -12,6 +12,7 @@ export namespace UserApi {
   export interface UserRecord {
     id: string;
     username: string;
+    realName?: string;
     nickName: string;
     email: string;
     phone: string;

@@ -208,10 +208,10 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 		// 系统日志
 		logs := authorized.Group("/system-logs")
 		{
-			logs.POST("/list", systemLogHandler.GetSystemLogList)
-			logs.POST("/batch-delete", systemLogHandler.BatchDeleteSystemLog)
-			logs.DELETE("/:id", systemLogHandler.DeleteSystemLog)
-			logs.POST("/clear", systemLogHandler.ClearSystemLog)
+			logs.POST("/list", withPermission("log:list", systemLogHandler.GetSystemLogList))
+			logs.POST("/batch-delete", withPermission("log:delete", systemLogHandler.BatchDeleteSystemLog))
+			logs.DELETE("/:id", withPermission("log:delete", systemLogHandler.DeleteSystemLog))
+			logs.POST("/clear", withPermission("log:clear", systemLogHandler.ClearSystemLog))
 		}
 	}
 }

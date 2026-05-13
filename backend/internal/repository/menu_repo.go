@@ -96,9 +96,11 @@ func (r *MenuRepository) List(tenantID string, page, pageSize int, name, menuTyp
 		}
 		switch menuType {
 		case "catalog":
-			query = query.Where("component = '' OR component IS NULL")
+			query = query.Where("(component = '' OR component IS NULL) AND (permission_code = '' OR permission_code IS NULL)")
 		case "menu":
 			query = query.Where("component != '' AND component IS NOT NULL")
+		case "button":
+			query = query.Where("permission_code != '' AND permission_code IS NOT NULL")
 		}
 		if status != nil {
 			query = query.Where("status = ?", *status)

@@ -20,7 +20,7 @@ const routes: RouteRecordRaw[] = [
         meta: {
           icon: 'lucide:file-text',
           title: '日志管理',
-          authority: ['system:log:view'],
+          authority: ['log:list'],
         },
       },
     ],

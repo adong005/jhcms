@@ -109,7 +109,7 @@ func (r *UserRepository) ListSubtree(rootPath string, page, pageSize int, userna
 }
 
 // List 获取用户列表（带租户隔离）
-func (r *UserRepository) List(tenantID, role, currentUserID string, page, pageSize int, username string, status *int) ([]model.User, int64, error) {
+func (r *UserRepository) List(tenantID, role, currentUserID string, page, pageSize int, username, nickName string, status *int) ([]model.User, int64, error) {
 	query := r.db.Model(&model.User{})
 
 	if role == "super_admin" {
@@ -125,6 +125,9 @@ func (r *UserRepository) List(tenantID, role, currentUserID string, page, pageSi
 
 	if username != "" {
 		query = query.Where("username LIKE ?", "%"+username+"%")
+	}
+	if nickName != "" {
+		query = query.Where("nick_name LIKE ?", "%"+nickName+"%")
 	}
 
 	if status != nil {

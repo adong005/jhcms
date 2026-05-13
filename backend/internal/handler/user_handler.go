@@ -38,6 +38,7 @@ func (h *UserHandler) GetUserList(c *gin.Context) {
 		Page     int                       `json:"page"`
 		PageSize int                       `json:"pageSize"`
 		Username string                    `json:"username"`
+		NickName string                    `json:"nickName"`
 		RealName string                    `json:"realName"`
 		Status   common.OptionalListStatus `json:"status"`
 	}
@@ -49,7 +50,7 @@ func (h *UserHandler) GetUserList(c *gin.Context) {
 		tenantIDStr, _ := tenantID.(string)
 		currentUserID, _ := currentUserIDVal.(string)
 
-		users, total, err := h.userRepo.List(tenantIDStr, roleStr, currentUserID, req.Page, req.PageSize, req.Username, req.Status.Ptr())
+		users, total, err := h.userRepo.List(tenantIDStr, roleStr, currentUserID, req.Page, req.PageSize, req.Username, req.NickName, req.Status.Ptr())
 		if err != nil {
 			return nil, 0, err
 		}
