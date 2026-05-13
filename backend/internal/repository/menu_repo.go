@@ -94,12 +94,11 @@ func (r *MenuRepository) List(tenantID string, page, pageSize int, name, menuTyp
 		if name != "" {
 			query = query.Where("name LIKE ?", "%"+name+"%")
 		}
-		if menuType != "" {
-			if menuType == "catalog" {
-				query = query.Where("component = '' OR component IS NULL")
-			} else if menuType == "menu" {
-				query = query.Where("component != '' AND component IS NOT NULL")
-			}
+		switch menuType {
+		case "catalog":
+			query = query.Where("component = '' OR component IS NULL")
+		case "menu":
+			query = query.Where("component != '' AND component IS NOT NULL")
 		}
 		if status != nil {
 			query = query.Where("status = ?", *status)

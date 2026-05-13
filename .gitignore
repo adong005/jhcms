@@ -8,6 +8,13 @@ backend/backup/
 
 # node_modules (admin dependencies managed separately)
 admin/node_modules/
+admin/**/node_modules/
+
+# admin build output & turbo cache
+admin/apps/*/dist/
+admin/apps/*/dist.zip
+admin/apps/*/.turbo/
+admin/.turbo/
 
 # OS
 .DS_Store
