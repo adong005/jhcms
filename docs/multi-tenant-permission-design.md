@@ -653,6 +653,83 @@ async function createMember(adminId: string, data: any) {
 
 **技术栈**：
 - 前端：Vben Admin 5.7.0 + Vue 3 + TypeScript
-- 后端：Node.js + Express/Koa
-- 数据库：MySQL/PostgreSQL
+- 后端：Go + Gin 框架 + GORM
+- 数据库：MySQL
 - 认证：JWT + bcrypt
+
+---
+
+## 九、Phase 1 重构变更记录（feature/user-permission）
+
+### PR-1：删除废弃业务模块
+
+**删除文件**：
+- `handler/`: info_handler, info_category_handler, form_manage_handler, site_config_handler, site_group_handler
+- `repository/`: info_repo, info_category_repo, form_repo, site_group_repo
+- `model/`: info, info_category, form, site_group, city, doc
+
+**数据库**：执行 `migrations/pr1_drop_business_tables.sql` 删除 forms/infos/info_categories/site_groups/city_list 表。
+
+**路由**：清理 router.go 中对应的 repo/handler 初始化及路由组。
+
+---
+
+### PR-2：用户表瘦身
+
+**新建表** `tenant_site_configs`（tenant_id UNIQUE，迁移 users 表中9个站点配置字段）：
+`title`, `keywords`, `description`, `domain`, `logo`, `icp_code`, `contact_phone`, `contact_address`, `contact_email`
+
+**model 变更**：新增 `model/tenant_site_config.go`，`model/user.go` 删除上述9个字段。
+
+**数据库**：执行 `migrations/pr2_tenant_site_configs.sql`（含数据迁移 + DROP COLUMN）。
+
+---
+
+### PR-3：用户树物化路径
+
+**users 表**：新增 `path VARCHAR(512)` 列（有索引）。
+
+**路径规则**：
+| 角色 | path 格式 |
+|------|----------|
+| super_admin | `/` |
+| admin（顶层租户） | `/{adminId}/` |
+| 子用户 | `/{adminId}/{userId}/` |
+| N 层子用户 | `/{adminId}/.../{userId}/` |
+
+**新增方法**：
+- `User.TenantID()` — 从 path 第一段提取顶层租户 ID
+- `UserRepository.Create()` — 自动构建 path
+- `UserRepository.ListSubtree(rootPath)` — 子树分页查询
+- `UserRepository.List()` — 改用 `path LIKE root%` 子树过滤
+- `middleware.SetTenantDB()` + `TenantMiddleware` — 注入 `user_path` 到 context
+
+**数据库**：执行 `migrations/pr3_user_path.sql`。
+
+---
+
+### PR-4：菜单表升级
+
+**menus 表**：
+- `parent_id_menu` 重命名为 `parent_id`
+- 新增 `path_chain VARCHAR(512)` 物化路径列
+
+**路径规则**（同用户树）：根菜单 `/{id}/`，子菜单 `/{rootId}/{childId}/`。
+
+**新增能力**：
+- `MenuRepository.Create()` — 自动构建 path_chain
+- `MenuRepository.Update()` — parent_id 变更时级联更新子菜单 path_chain
+
+**数据库**：执行 `migrations/pr4_menu_upgrade.sql`。
+
+---
+
+### PR-5：Handler 文件拆分
+
+`user_handler.go`（997行）拆分为3个文件：
+
+| 文件 | 职责 |
+|------|------|
+| `user_handler.go` | CRUD 管理（列表/创建/更新/删除/状态/批量） |
+| `user_profile_handler.go` | 个人中心（资料/安全/密码/手机/邮箱/密保/Google Auth/通知） |
+| `user_helper.go` | 纯辅助函数（JSON 解析/角色转换/密码工具/日期解析） |
