@@ -494,8 +494,15 @@ async function handleSavePermission() {
       `已为角色"${currentRoleName.value}"配置 ${checkedKeys.value.length} 个权限点`,
     );
     permissionDrawerApi.close();
-  } catch (error) {
-    message.error('权限配置保存失败');
+  } catch (error: any) {
+    const data = error?.response?.data?.data;
+    const details = data?.invalidPermissions as { code?: string; permissionId?: string }[] | undefined;
+    if (details?.length) {
+      const codes = details.map((x) => x.code || x.permissionId || '').filter(Boolean).join(', ');
+      message.warning(`以下权限超出可委派范围: ${codes}`);
+    } else {
+      message.error('权限配置保存失败');
+    }
     console.error('保存权限失败:', error);
   } finally {
     permissionLoading.value = false;

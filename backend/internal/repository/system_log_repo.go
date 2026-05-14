@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"adcms-backend/internal/model"
+	"adcms-backend/internal/pkg/datascope"
 
 	"gorm.io/gorm"
 )
@@ -54,7 +55,7 @@ func (r *SystemLogRepository) List(p SystemLogListParams) ([]model.SystemLog, in
 		}
 		// 用 path 子树隔离：admin 及其所有层级子用户的日志。
 		if p.UserPath != "" && p.UserPath != "/" {
-			query = query.Where("path LIKE ?", p.UserPath+"%")
+			query = datascope.ApplyUserPathSubtree(query, "path", p.UserPath)
 		} else if p.UserID != "" {
 			query = query.Where("user_id = ? OR parent_id = ?", p.UserID, p.UserID)
 		}

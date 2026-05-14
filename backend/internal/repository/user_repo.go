@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"adcms-backend/internal/model"
+	"adcms-backend/internal/pkg/datascope"
 	"adcms-backend/internal/pkg/ids"
 
 	"gorm.io/gorm"
@@ -94,7 +95,7 @@ func (r *UserRepository) UpdateLastLogin(userID string) error {
 
 // ListSubtree 查询 rootPath 子树下的所有用户（包含 root 本身）。
 func (r *UserRepository) ListSubtree(rootPath string, page, pageSize int, username string, status *int) ([]model.User, int64, error) {
-	query := r.db.Model(&model.User{}).Where("path LIKE ?", rootPath+"%")
+	query := datascope.ApplyUserPathSubtree(r.db.Model(&model.User{}), "path", rootPath)
 	if username != "" {
 		query = query.Where("username LIKE ?", "%"+username+"%")
 	}
@@ -117,7 +118,7 @@ func (r *UserRepository) List(tenantID, role, currentUserID string, page, pageSi
 	} else if currentUserID != "" {
 		var cur model.User
 		if err := r.db.Select("id, path, role, is_admin").Where("id = ?", currentUserID).First(&cur).Error; err == nil && cur.Path != "" && cur.Path != "/" {
-			query = query.Where("path LIKE ?", cur.Path+"%")
+			query = datascope.ApplyUserPathSubtree(query, "path", cur.Path)
 		} else {
 			query = query.Where("id = ? OR created_by = ?", currentUserID, currentUserID)
 		}

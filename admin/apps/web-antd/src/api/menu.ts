@@ -14,6 +14,8 @@ export namespace MenuApi {
     status: number;
     createTime: string;
     updateTime: string;
+    permissionCode?: string;
+    permissionCodes?: string[];
   }
 
   export interface MenuListParams {

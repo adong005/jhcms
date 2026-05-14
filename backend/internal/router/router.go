@@ -4,6 +4,8 @@ import (
 	"adcms-backend/internal/config"
 	"adcms-backend/internal/handler"
 	"adcms-backend/internal/middleware"
+	"adcms-backend/internal/pkg/permissionalias"
+	"adcms-backend/internal/pkg/response"
 	"adcms-backend/internal/repository"
 	"adcms-backend/internal/service"
 
@@ -16,6 +18,24 @@ func withPermission(code string, h gin.HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		middleware.PermissionMiddleware(code)(c)
 		if c.IsAborted() {
+			return
+		}
+		h(c)
+	}
+}
+
+func withAnyPermission(codes []string, h gin.HandlerFunc) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ok := false
+		for _, code := range codes {
+			if middleware.CheckPermission(c, code) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			response.Forbidden(c, "无权限访问")
+			c.Abort()
 			return
 		}
 		h(c)
@@ -89,20 +109,17 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 		if err != nil {
 			return false
 		}
-		for _, c := range codes {
-			if c == code {
-				return true
-			}
-		}
-		return false
+		eff := permissionalias.EffectiveCodes(codes)
+		_, has := eff[code]
+		return has
 	})
 
 	// 初始化 Handler
 	authHandler := handler.NewAuthHandler(authService)
-	menuHandler := handler.NewMenuHandler(menuRepo)
+	menuHandler := handler.NewMenuHandler(menuRepo, userRepo)
 	permissionHandler := handler.NewPermissionHandler(permissionRepo)
 	userHandler := handler.NewUserHandler(userRepo)
-	roleHandler := handler.NewRoleHandler(roleRepo)
+	roleHandler := handler.NewRoleHandler(roleRepo, permissionRepo)
 	systemLogHandler := handler.NewSystemLogHandler(systemLogRepo)
 
 	// 健康检查
@@ -140,13 +157,13 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 			menu.GET("/all", menuHandler.GetAllMenus) // 系统导航菜单
 			registerCRUDRoutes(menu, CRUDHandlers{
 				List:        withPermission("system:menu:list", menuHandler.GetMenuList),
-				Create:      withPermission("system:menu:update", menuHandler.CreateMenu),
+				Create:      withPermission("system:menu:create", menuHandler.CreateMenu),
 				Update:      withPermission("system:menu:update", menuHandler.UpdateMenu),
-				Delete:      withPermission("system:menu:update", menuHandler.DeleteMenu),
-				Status:      withPermission("system:menu:update", menuHandler.UpdateMenuStatus),
-				BatchDelete: withPermission("system:menu:update", menuHandler.BatchDeleteMenu),
+				Delete:      withPermission("system:menu:delete", menuHandler.DeleteMenu),
+				Status:      withPermission("system:menu:status", menuHandler.UpdateMenuStatus),
+				BatchDelete: withPermission("system:menu:delete", menuHandler.BatchDeleteMenu),
 			})
-			menu.POST("/show", withPermission("system:menu:update", menuHandler.UpdateMenuShow))
+			menu.POST("/show", withPermission("system:menu:show", menuHandler.UpdateMenuShow))
 		}
 
 		// 权限管理
@@ -210,12 +227,12 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 		// 系统日志
 		logs := authorized.Group("/system-logs")
 		{
-			logs.POST("/list", withPermission("log:list", systemLogHandler.GetSystemLogList))
-			logs.POST("/export", withPermission("log:list", systemLogHandler.ExportSystemLog))
-			logs.POST("/purge", withPermission("log:clear", systemLogHandler.PurgeOldLogs))
-			logs.POST("/batch-delete", withPermission("log:delete", systemLogHandler.BatchDeleteSystemLog))
-			logs.DELETE("/:id", withPermission("log:delete", systemLogHandler.DeleteSystemLog))
-			logs.POST("/clear", withPermission("log:clear", systemLogHandler.ClearSystemLog))
+			logs.POST("/list", withPermission("system:log:list", systemLogHandler.GetSystemLogList))
+			logs.POST("/export", withAnyPermission([]string{"system:log:list", "log:list"}, systemLogHandler.ExportSystemLog))
+			logs.POST("/purge", withPermission("system:log:clear", systemLogHandler.PurgeOldLogs))
+			logs.POST("/batch-delete", withPermission("system:log:delete", systemLogHandler.BatchDeleteSystemLog))
+			logs.DELETE("/:id", withPermission("system:log:delete", systemLogHandler.DeleteSystemLog))
+			logs.POST("/clear", withPermission("system:log:clear", systemLogHandler.ClearSystemLog))
 		}
 	}
 }

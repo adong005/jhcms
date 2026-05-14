@@ -216,20 +216,104 @@ func (r *MenuRepository) UpdateShow(id string, tenantID string, isShow int8) err
 }
 
 func (r *MenuRepository) Delete(id string, tenantID string) error {
-	query := r.db.Where("id = ?", id)
-	if tenantID != "" {
-		query = query.Where("tenant_id = ?", tenantID)
-	}
-	return query.Delete(&model.Menu{}).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("menu_id = ?", id).Delete(&model.MenuPermission{}).Error; err != nil {
+			return err
+		}
+		q := tx.Where("id = ?", id)
+		if tenantID != "" {
+			q = q.Where("tenant_id = ?", tenantID)
+		}
+		return q.Delete(&model.Menu{}).Error
+	})
 }
 
 func (r *MenuRepository) BatchDelete(ids []string, tenantID string) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	query := r.db.Where("id IN ?", ids)
-	if tenantID != "" {
-		query = query.Where("tenant_id = ?", tenantID)
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("menu_id IN ?", ids).Delete(&model.MenuPermission{}).Error; err != nil {
+			return err
+		}
+		q := tx.Where("id IN ?", ids)
+		if tenantID != "" {
+			q = q.Where("tenant_id = ?", tenantID)
+		}
+		return q.Delete(&model.Menu{}).Error
+	})
+}
+
+// PermissionCodesByMenuIDs 返回每个菜单关联的权限码（含 menu_permissions 与 menus.permission_code）。
+func (r *MenuRepository) PermissionCodesByMenuIDs(menuIDs []string) (map[string][]string, error) {
+	out := make(map[string][]string)
+	if len(menuIDs) == 0 {
+		return out, nil
 	}
-	return query.Delete(&model.Menu{}).Error
+	type joinRow struct {
+		MenuID string `gorm:"column:menu_id"`
+		Code   string `gorm:"column:code"`
+	}
+	var jrows []joinRow
+	if err := r.db.Table("menu_permissions AS mp").
+		Select("mp.menu_id, p.code").
+		Joins("JOIN permissions AS p ON p.id = mp.permission_id").
+		Where("mp.menu_id IN ?", menuIDs).
+		Scan(&jrows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range jrows {
+		if row.Code == "" {
+			continue
+		}
+		out[row.MenuID] = appendUniqueCode(out[row.MenuID], row.Code)
+	}
+	var menus []model.Menu
+	if err := r.db.Select("id", "permission_code").Where("id IN ?", menuIDs).Find(&menus).Error; err != nil {
+		return nil, err
+	}
+	for _, m := range menus {
+		pc := strings.TrimSpace(m.PermissionCode)
+		if pc == "" {
+			continue
+		}
+		out[m.ID] = appendUniqueCode(out[m.ID], pc)
+	}
+	return out, nil
+}
+
+func appendUniqueCode(list []string, code string) []string {
+	for _, x := range list {
+		if x == code {
+			return list
+		}
+	}
+	return append(list, code)
+}
+
+// ReplaceMenuPermissionLinks 用权限码列表重写某菜单的 menu_permissions 行。
+func (r *MenuRepository) ReplaceMenuPermissionLinks(menuID string, permissionCodes []string) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("menu_id = ?", menuID).Delete(&model.MenuPermission{}).Error; err != nil {
+			return err
+		}
+		if len(permissionCodes) == 0 {
+			return nil
+		}
+		var perms []model.Permission
+		if err := tx.Where("code IN ?", permissionCodes).Find(&perms).Error; err != nil {
+			return err
+		}
+		for i := range perms {
+			row := model.MenuPermission{
+				ID:           ids.New(),
+				MenuID:       menuID,
+				PermissionID: perms[i].ID,
+			}
+			if err := tx.Create(&row).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

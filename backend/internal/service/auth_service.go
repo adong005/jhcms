@@ -2,10 +2,12 @@ package service
 
 import (
 	"errors"
+	"sort"
 	"time"
 
 	"adcms-backend/internal/config"
 	"adcms-backend/internal/model"
+	"adcms-backend/internal/pkg/permissionalias"
 	"adcms-backend/internal/repository"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -141,7 +143,13 @@ func (s *AuthService) GetAccessCodes(userID string, role string) []string {
 	if err != nil {
 		return []string{}
 	}
-	return codes
+	eff := permissionalias.EffectiveCodes(codes)
+	out := make([]string, 0, len(eff))
+	for c := range eff {
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Impersonate 模拟登录为指定用户

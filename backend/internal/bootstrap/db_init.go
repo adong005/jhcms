@@ -34,6 +34,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.Role{},
 		&model.RolePermission{},
 		&model.Menu{},
+		&model.MenuPermission{},
 		&model.SystemLog{},
 		&model.TenantSiteConfig{},
 	); err != nil {
@@ -66,6 +67,11 @@ func MigrateSchema(db *gorm.DB) error {
 	if err := normalizeRoleTenantID(db); err != nil {
 		return err
 	}
+	if db.Migrator().HasColumn(&model.Role{}, "parent_id") {
+		if err := db.Migrator().DropColumn(&model.Role{}, "parent_id"); err != nil {
+			return err
+		}
+	}
 	// 历史数据兼容：菜单显示字段默认按显示处理，避免升级后菜单意外不可见。
 	if db.Migrator().HasColumn(&model.Menu{}, "is_show") {
 		if err := db.Exec("UPDATE menus SET is_show = 1 WHERE is_show IS NULL").Error; err != nil {
@@ -87,6 +93,7 @@ func normalizeRoleTenantID(db *gorm.DB) error {
 
 func resetAllTables(db *gorm.DB) error {
 	return db.Migrator().DropTable(
+		&model.MenuPermission{},
 		&model.RolePermission{},
 		&model.SystemLog{},
 		&model.Menu{},
@@ -141,6 +148,9 @@ func seedDefaultData(db *gorm.DB) error {
 	if err := seedDefaultMenus(db); err != nil {
 		return err
 	}
+	if err := backfillMenuPermissionLinks(db); err != nil {
+		return err
+	}
 	if err := seedDefaultAdmin(db); err != nil {
 		return err
 	}
@@ -173,23 +183,40 @@ func seedDefaultRoles(db *gorm.DB) error {
 
 func seedDefaultPermissions(db *gorm.DB) (map[string]string, error) {
 	// 统一维护权限点，覆盖已接入 withPermission 的接口，并补齐核心业务模块权限。
+	// 命名规范：{module}:{resource}:{action}
 	permissions := []model.Permission{
-		// 系统管理（路由 withPermission 已使用）
+		// 用户管理
 		{Code: "system:user:list", Name: "用户列表", Module: "system"},
 		{Code: "system:user:create", Name: "创建用户", Module: "system"},
 		{Code: "system:user:update", Name: "编辑用户", Module: "system"},
 		{Code: "system:user:delete", Name: "删除用户", Module: "system"},
+		// 角色管理
 		{Code: "system:role:list", Name: "角色列表", Module: "system"},
 		{Code: "system:role:create", Name: "创建角色", Module: "system"},
 		{Code: "system:role:update", Name: "编辑角色", Module: "system"},
+		{Code: "system:role:delete", Name: "删除角色", Module: "system"},
+		{Code: "system:role:status", Name: "角色状态", Module: "system"},
 		{Code: "system:role:permission", Name: "角色授权", Module: "system", IsDelegable: false},
+		// 菜单管理（细粒度）
 		{Code: "system:menu:list", Name: "菜单列表", Module: "system"},
+		{Code: "system:menu:create", Name: "创建菜单", Module: "system"},
 		{Code: "system:menu:update", Name: "编辑菜单", Module: "system"},
-		{Code: "system:permission:list", Name: "权限管理", Module: "system"},
-		// 日志
-		{Code: "log:list", Name: "日志列表", Module: "log"},
-		{Code: "log:delete", Name: "删除日志", Module: "log"},
-		{Code: "log:clear", Name: "清空日志", Module: "log"},
+		{Code: "system:menu:delete", Name: "删除菜单", Module: "system"},
+		{Code: "system:menu:status", Name: "菜单状态", Module: "system"},
+		{Code: "system:menu:show", Name: "菜单显示", Module: "system"},
+		// 权限管理
+		{Code: "system:permission:list", Name: "权限列表", Module: "system"},
+		{Code: "system:permission:create", Name: "创建权限", Module: "system"},
+		{Code: "system:permission:update", Name: "编辑权限", Module: "system"},
+		{Code: "system:permission:delete", Name: "删除权限", Module: "system"},
+		// 日志管理（统一 system: 前缀）
+		{Code: "system:log:list", Name: "日志列表", Module: "system"},
+		{Code: "system:log:delete", Name: "删除日志", Module: "system"},
+		{Code: "system:log:clear", Name: "清空日志", Module: "system"},
+		// 旧权限码兼容别名（过渡期保留，下个大版本移除）
+		{Code: "log:list", Name: "[兼容] 日志列表", Module: "system"},
+		{Code: "log:delete", Name: "[兼容] 删除日志", Module: "system"},
+		{Code: "log:clear", Name: "[兼容] 清空日志", Module: "system"},
 	}
 	codeToID := make(map[string]string, len(permissions))
 	for i := range permissions {
@@ -214,51 +241,81 @@ func seedDefaultPermissions(db *gorm.DB) (map[string]string, error) {
 
 func seedDefaultMenus(db *gorm.DB) error {
 	tenantID := ids.DefaultTenantUUID
-	_ = db.Where("tenant_id = ?", tenantID).Delete(&model.Menu{}).Error
 
 	type menuSeed struct {
-		Name      string
-		Path      string
-		Component string
-		Icon      string
-		SortOrder int
-		ParentID  *string
+		Name           string
+		Path           string
+		Component      string
+		Icon           string
+		PermissionCode string
+		SortOrder      int
+		ParentPath     string // 用于查父节点，非根节点时填父菜单的 Path
 	}
 
-	systemID := ids.New()
-	dashboardID := ids.New()
+	seeds := []menuSeed{
+		{Name: "工作台", Path: "/dashboard", Icon: "mdi:view-dashboard", SortOrder: 1},
+		{Name: "系统管理", Path: "/system", Icon: "mdi:cog", SortOrder: 2},
+		{Name: "个人中心", Path: "/profile", Component: "/_core/profile/index", Icon: "mdi:account-circle", SortOrder: 4},
+		{Name: "日志管理", Path: "/system-logs/list", Component: "/system-logs/list", Icon: "lucide:file-text", PermissionCode: "system:log:list", SortOrder: 5},
+		{Name: "概览", Path: "/analytics", Component: "/dashboard/analytics/index", Icon: "mdi:view-dashboard", SortOrder: 1, ParentPath: "/dashboard"},
+		{Name: "用户管理", Path: "/users/list", Component: "/users/list", Icon: "lucide:users", PermissionCode: "system:user:list", SortOrder: 1, ParentPath: "/system"},
+		{Name: "角色管理", Path: "/roles/list", Component: "/roles/list", Icon: "lucide:shield", PermissionCode: "system:role:list", SortOrder: 2, ParentPath: "/system"},
+		{Name: "菜单管理", Path: "/menus/list", Component: "/menus/list", Icon: "lucide:menu", PermissionCode: "system:menu:list", SortOrder: 3, ParentPath: "/system"},
+		{Name: "权限管理", Path: "/permissions/list", Component: "/permissions/list", Icon: "lucide:key-round", PermissionCode: "system:permission:list", SortOrder: 4, ParentPath: "/system"},
+	}
 
-	seeds := []struct {
-		ID string
-		menuSeed
-	}{
-		{dashboardID, menuSeed{Name: "工作台", Path: "/dashboard", Icon: "mdi:view-dashboard", SortOrder: 1}},
-		{systemID, menuSeed{Name: "系统管理", Path: "/system", Icon: "mdi:cog", SortOrder: 2}},
-		{ids.New(), menuSeed{Name: "个人中心", Path: "/profile", Component: "/_core/profile/index", Icon: "mdi:account-circle", SortOrder: 4}},
-		{ids.New(), menuSeed{Name: "日志管理", Path: "/system-logs/list", Component: "/system-logs/list", Icon: "lucide:file-text", SortOrder: 5}},
-		{ids.New(), menuSeed{Name: "概览", Path: "/analytics", Component: "/dashboard/analytics/index", Icon: "mdi:view-dashboard", SortOrder: 1, ParentID: &dashboardID}},
-		{ids.New(), menuSeed{Name: "用户管理", Path: "/users/list", Component: "/users/list", Icon: "lucide:users", SortOrder: 1, ParentID: &systemID}},
-		{ids.New(), menuSeed{Name: "角色管理", Path: "/roles/list", Component: "/roles/list", Icon: "lucide:shield", SortOrder: 2, ParentID: &systemID}},
-		{ids.New(), menuSeed{Name: "菜单管理", Path: "/menus/list", Component: "/menus/list", Icon: "lucide:menu", SortOrder: 3, ParentID: &systemID}},
-		{ids.New(), menuSeed{Name: "权限管理", Path: "/permissions/list", Component: "/permissions/list", Icon: "lucide:key-round", SortOrder: 4, ParentID: &systemID}},
+	// pathToID 缓存已存在或刚创建的菜单 ID，用于设置 ParentID
+	pathToID := make(map[string]string)
+
+	// 预先加载已存在的同租户菜单 ID
+	var existing []struct {
+		ID   string
+		Path string
+	}
+	_ = db.Model(&model.Menu{}).Where("tenant_id = ?", tenantID).Select("id, path").Scan(&existing).Error
+	for _, e := range existing {
+		pathToID[e.Path] = e.ID
 	}
 
 	for _, s := range seeds {
+		var parentID *string
+		if s.ParentPath != "" {
+			if pid, ok := pathToID[s.ParentPath]; ok {
+				parentID = &pid
+			}
+		}
+		// upsert by (tenant_id, path)
+		if existingID, ok := pathToID[s.Path]; ok {
+			// 仅更新 name/icon/component/sort_order/permission_code，不覆盖用户自定义改动
+			if err := db.Model(&model.Menu{}).Where("id = ?", existingID).Updates(map[string]interface{}{
+				"name":            s.Name,
+				"icon":            s.Icon,
+				"component":       s.Component,
+				"sort_order":      s.SortOrder,
+				"permission_code": s.PermissionCode,
+			}).Error; err != nil {
+				return err
+			}
+			continue
+		}
+		newID := ids.New()
 		m := model.Menu{
-			ID:           s.ID,
-			TenantScoped: model.TenantScoped{TenantID: tenantID},
-			Name:         s.Name,
-			Path:         s.Path,
-			Component:    s.Component,
-			Icon:         s.Icon,
-			SortOrder:    s.SortOrder,
-			IsShow:       1,
-			Status:       1,
-			ParentID:     s.ParentID,
+			ID:             newID,
+			TenantScoped:   model.TenantScoped{TenantID: tenantID},
+			Name:           s.Name,
+			Path:           s.Path,
+			Component:      s.Component,
+			Icon:           s.Icon,
+			PermissionCode: s.PermissionCode,
+			SortOrder:      s.SortOrder,
+			IsShow:         1,
+			Status:         1,
+			ParentID:       parentID,
 		}
 		if err := db.Create(&m).Error; err != nil {
 			return err
 		}
+		pathToID[s.Path] = newID
 	}
 	return nil
 }
@@ -346,14 +403,16 @@ func seedRolePermissions(db *gorm.DB, codeToID map[string]string) error {
 		"super_admin": {
 			"system:user:list", "system:user:create", "system:user:update", "system:user:delete",
 			"system:role:list", "system:role:create", "system:role:update", "system:role:permission",
-			"system:menu:list", "system:menu:update", "system:permission:list",
-			"log:list", "log:delete", "log:clear",
+			"system:menu:list", "system:menu:create", "system:menu:update", "system:menu:delete", "system:menu:status", "system:menu:show",
+			"system:permission:list",
+			"system:log:list", "system:log:delete", "system:log:clear",
 		},
 		"admin": {
 			"system:user:list", "system:user:create", "system:user:update", "system:user:delete",
 			"system:role:list", "system:role:create", "system:role:update", "system:role:permission",
-			"system:menu:list", "system:menu:update", "system:permission:list",
-			"log:list", "log:delete", "log:clear",
+			"system:menu:list", "system:menu:create", "system:menu:update", "system:menu:delete", "system:menu:status", "system:menu:show",
+			"system:permission:list",
+			"system:log:list", "system:log:delete", "system:log:clear",
 		},
 		"user": {},
 	}
@@ -381,6 +440,42 @@ func seedRolePermissions(db *gorm.DB, codeToID map[string]string) error {
 			if err := db.Create(&rows).Error; err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func backfillMenuPermissionLinks(db *gorm.DB) error {
+	var menus []model.Menu
+	if err := db.Find(&menus).Error; err != nil {
+		return err
+	}
+	for i := range menus {
+		m := menus[i]
+		pc := strings.TrimSpace(m.PermissionCode)
+		if pc == "" {
+			continue
+		}
+		var p model.Permission
+		if err := db.Where("code = ?", pc).First(&p).Error; err != nil {
+			continue
+		}
+		var n int64
+		if err := db.Model(&model.MenuPermission{}).
+			Where("menu_id = ? AND permission_id = ?", m.ID, p.ID).
+			Count(&n).Error; err != nil {
+			return err
+		}
+		if n > 0 {
+			continue
+		}
+		row := model.MenuPermission{
+			ID:           ids.New(),
+			MenuID:       m.ID,
+			PermissionID: p.ID,
+		}
+		if err := db.Create(&row).Error; err != nil {
+			return err
 		}
 	}
 	return nil

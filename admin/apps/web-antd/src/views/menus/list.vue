@@ -79,6 +79,15 @@ const [MenuForm, formApi] = useVbenForm({
       label: '组件路径',
     },
     {
+      component: 'Textarea',
+      componentProps: {
+        placeholder: '每行一个权限码（与「权限管理」中的编码一致）；多码时菜单需满足任一码即可见',
+        rows: 4,
+      },
+      fieldName: 'permissionCodesText',
+      label: '关联权限码',
+    },
+    {
       component: 'InputNumber',
       componentProps: {
         placeholder: '请输入排序',
@@ -405,6 +414,9 @@ async function handleEdit(record: MenuRecord) {
     order: record.order,
     status: record.status,
     isShow: record.isShow ?? 1,
+    permissionCodesText: (record as any).permissionCodes?.length
+      ? (record as any).permissionCodes.join('\n')
+      : (record as any).permissionCode || '',
   });
 
   drawerApi.open();
@@ -417,14 +429,20 @@ async function handleSubmit() {
     submitLoading.value = true;
 
     const formValues = await formApi.getValues();
+    const permissionCodes = String((formValues as any).permissionCodesText || '')
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const { permissionCodesText: _pct, ...payload } = formValues as any;
+    const body = { ...payload, permissionCodes };
 
     if (isEdit.value) {
       // 编辑菜单
-      await updateMenuInfoApi(currentMenuId.value, formValues);
+      await updateMenuInfoApi(currentMenuId.value, body);
       message.success('编辑菜单成功');
     } else {
       // 新增菜单
-      await createMenuApi(formValues);
+      await createMenuApi(body);
       message.success('新增菜单成功');
     }
 

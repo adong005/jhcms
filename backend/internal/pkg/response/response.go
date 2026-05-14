@@ -60,6 +60,15 @@ func Error(c *gin.Context, message string) {
 	})
 }
 
+// ErrorWithData 错误响应（附带 data，便于前端展示明细）
+func ErrorWithData(c *gin.Context, message string, data interface{}) {
+	c.JSON(http.StatusOK, Response{
+		Code:    ErrorCode,
+		Message: message,
+		Data:    data,
+	})
+}
+
 // ErrorWithCode 错误响应（自定义错误码）
 func ErrorWithCode(c *gin.Context, code int, message string) {
 	c.JSON(http.StatusOK, Response{

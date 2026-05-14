@@ -1,23 +1,27 @@
 package handler
 
 import (
+	"errors"
+	"strings"
+
 	"adcms-backend/internal/model"
 	"adcms-backend/internal/pkg/common"
 	"adcms-backend/internal/pkg/ids"
 	"adcms-backend/internal/pkg/response"
 	"adcms-backend/internal/repository"
 	"regexp"
-	"strings"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type RoleHandler struct {
 	roleRepo *repository.RoleRepository
+	permRepo *repository.PermissionRepository
 }
 
-func NewRoleHandler(roleRepo *repository.RoleRepository) *RoleHandler {
-	return &RoleHandler{roleRepo: roleRepo}
+func NewRoleHandler(roleRepo *repository.RoleRepository, permRepo *repository.PermissionRepository) *RoleHandler {
+	return &RoleHandler{roleRepo: roleRepo, permRepo: permRepo}
 }
 
 // GetRoleList 获取角色列表
@@ -103,6 +107,10 @@ func (h *RoleHandler) CreateRole(c *gin.Context) {
 		}
 	}
 	if err := h.roleRepo.Create(role); err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) || strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+			response.Error(c, "角色编码已存在，请更换后重试")
+			return
+		}
 		response.Error(c, "创建角色失败")
 		return
 	}
@@ -310,11 +318,27 @@ func (h *RoleHandler) UpdateRolePermission(c *gin.Context) {
 		for _, mid := range assignable {
 			allowMap[mid] = struct{}{}
 		}
+		var invalid []string
 		for _, targetID := range permissionIDs {
 			if _, ok := allowMap[targetID]; !ok {
-				response.Error(c, "存在超出当前角色可委派范围的权限")
+				invalid = append(invalid, targetID)
+			}
+		}
+		if len(invalid) > 0 {
+			idToCode, errCodes := h.permRepo.CodesByPermissionIDs(invalid)
+			if errCodes != nil {
+				response.Error(c, "获取可委派权限失败")
 				return
 			}
+			details := make([]gin.H, 0, len(invalid))
+			for _, id := range invalid {
+				details = append(details, gin.H{"permissionId": id, "code": idToCode[id]})
+			}
+			response.ErrorWithData(c, "存在超出当前角色可委派范围的权限", gin.H{
+				"invalidPermissionIds": invalid,
+				"invalidPermissions":   details,
+			})
+			return
 		}
 	}
 

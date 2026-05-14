@@ -70,3 +70,19 @@ func (r *PermissionRepository) BatchDelete(idsIn []string) error {
 	}
 	return r.db.Where("id IN ?", idsIn).Delete(&model.Permission{}).Error
 }
+
+// CodesByPermissionIDs 返回 permission id -> code。
+func (r *PermissionRepository) CodesByPermissionIDs(ids []string) (map[string]string, error) {
+	out := make(map[string]string)
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var rows []model.Permission
+	if err := r.db.Select("id", "code").Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		out[rows[i].ID] = rows[i].Code
+	}
+	return out, nil
+}

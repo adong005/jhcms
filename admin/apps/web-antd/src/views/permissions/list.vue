@@ -119,17 +119,20 @@ const formOptions: any = {
 };
 
 function buildPermissionTreeRows(items: PermissionRecord[]): PermissionTreeRow[] {
-  const moduleMap = new Map<string, Map<string, PermissionRecord[]>>();
+  const moduleMap = new Map<string, PermissionRecord[]>();
   for (const item of items) {
-    const [module = 'other', resource = 'misc'] = String(item.code || '').split(':');
-    if (!moduleMap.has(module)) moduleMap.set(module, new Map());
-    const resourceMap = moduleMap.get(module)!;
-    if (!resourceMap.has(resource)) resourceMap.set(resource, []);
-    resourceMap.get(resource)!.push(item);
+    const mod =
+      (item.module && String(item.module).trim()) ||
+      (String(item.code || '').split(':')[0] || 'other');
+    if (!moduleMap.has(mod)) {
+      moduleMap.set(mod, []);
+    }
+    moduleMap.get(mod)!.push(item);
   }
 
   const rows: PermissionTreeRow[] = [];
-  for (const [module, resourceMap] of moduleMap.entries()) {
+  for (const [module, perms] of moduleMap.entries()) {
+    perms.sort((a, b) => String(a.code).localeCompare(String(b.code)));
     const moduleId = `module:${module}`;
     rows.push({
       id: moduleId,
@@ -143,27 +146,12 @@ function buildPermissionTreeRows(items: PermissionRecord[]): PermissionTreeRow[]
       parentId: null,
     });
 
-    for (const [resource, perms] of resourceMap.entries()) {
-      const resourceId = `resource:${module}:${resource}`;
+    for (const perm of perms) {
       rows.push({
-        id: resourceId,
-        name: resource,
-        code: '',
-        module,
-        isDelegable: false,
-        createTime: '',
-        updateTime: '',
-        isGroup: true,
+        ...perm,
+        id: String(perm.id),
         parentId: moduleId,
       });
-
-      for (const perm of perms) {
-        rows.push({
-          ...perm,
-          id: String(perm.id),
-          parentId: resourceId,
-        });
-      }
     }
   }
   return rows;
