@@ -1,8 +1,6 @@
 package middleware
 
 import (
-	"adcms-backend/internal/model"
-	"adcms-backend/internal/pkg/ids"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -11,26 +9,13 @@ import (
 	"strings"
 	"time"
 
+	"adcms-backend/internal/model"
+	"adcms-backend/internal/pkg/ids"
+
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
-
-// logCh 是操作日志异步写库的缓冲通道。
-var logCh = make(chan *model.SystemLog, 1024)
-
-// StartLogConsumer 启动后台 goroutine 消费日志通道，进程级单例，应在服务启动时调用。
-func StartLogConsumer(db *gorm.DB, logger *zap.Logger) {
-	go func() {
-		for item := range logCh {
-			if err := db.Create(item).Error; err != nil {
-				if logger != nil {
-					logger.Error("operation log write failed", zap.Error(err), zap.String("id", item.ID))
-				}
-			}
-		}
-	}()
-}
 
 func resolveAction(method, path string) string {
 	p := strings.ToLower(path)
@@ -142,11 +127,9 @@ func maskErrorMsg(raw string) string {
 	return strings.TrimSpace(strings.ReplaceAll(raw, "\n", " | "))
 }
 
-// OperationLogMiddleware 将已登录用户的 API 操作异步落库到 system_logs。
-// 依赖 StartLogConsumer 已在启动时调用。
-func OperationLogMiddleware(_ *gorm.DB) gin.HandlerFunc {
+// OperationLogMiddleware 将已登录用户的 API 操作落库到 system_logs（同步写入，避免通道丢数）。
+func OperationLogMiddleware(db *gorm.DB, logger *zap.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 注入 request_id
 		reqID := c.GetHeader("X-Request-Id")
 		if reqID == "" || !ids.Valid(reqID) {
 			reqID = ids.New()
@@ -174,7 +157,6 @@ func OperationLogMiddleware(_ *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		// 排除健康检查，避免噪音。日志自身的操作（delete/clear/purge）允许被记录。
 		if strings.HasPrefix(path, "/health") {
 			return
 		}
@@ -183,13 +165,35 @@ func OperationLogMiddleware(_ *gorm.DB) gin.HandlerFunc {
 		usernameVal, hasUsername := c.Get("username")
 		tenantIDVal, hasTenant := c.Get("tenant_id")
 		if !hasUser || !hasUsername || !hasTenant {
+			logger.Warn("operation log skipped: missing auth context",
+				zap.Bool("hasUser", hasUser),
+				zap.Bool("hasUsername", hasUsername),
+				zap.Bool("hasTenant", hasTenant),
+				zap.String("path", c.Request.URL.Path))
 			return
 		}
 
 		userID, _ := userIDVal.(string)
 		username, _ := usernameVal.(string)
 		tenantID, _ := tenantIDVal.(string)
+		if tenantID == "" {
+			if rv, ok := c.Get("role"); ok {
+				if r, _ := rv.(string); r == "super_admin" {
+					tenantID = ids.DefaultTenantUUID
+				}
+			}
+			if tenantID == "" {
+				if sup, ok := c.Get("is_platform_super_admin"); ok && sup == true {
+					tenantID = ids.DefaultTenantUUID
+				}
+			}
+		}
 		if userID == "" || username == "" || tenantID == "" {
+			logger.Warn("operation log skipped: empty user identity",
+				zap.String("userID", userID),
+				zap.String("username", username),
+				zap.String("tenantID", tenantID),
+				zap.String("path", c.Request.URL.Path))
 			return
 		}
 
@@ -238,10 +242,12 @@ func OperationLogMiddleware(_ *gorm.DB) gin.HandlerFunc {
 			ParentID:    parentID,
 		}
 
-		// 非阻塞投递，通道满时丢弃（操作日志允许少量丢失，不影响主流程）。
-		select {
-		case logCh <- entry:
-		default:
+		if err := db.Create(entry).Error; err != nil {
+			logger.Error("operation log write failed",
+				zap.Error(err),
+				zap.String("logId", entry.ID),
+				zap.String("path", path),
+				zap.String("tenantID", entry.TenantID))
 		}
 	}
 }

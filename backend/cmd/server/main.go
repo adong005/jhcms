@@ -29,6 +29,7 @@ func main() {
 		log.Fatalf("Failed to initialize logger: %v", err)
 	}
 	defer logger.Sync()
+	zap.ReplaceGlobals(logger)
 
 	// 初始化 JWT
 	jwt.Init(cfg.JWT.Secret)
@@ -78,7 +79,7 @@ func main() {
 	r.Static("/uploads", "./uploads")
 
 	// 设置路由
-	router.Setup(r, db, cfg)
+	router.Setup(r, db, cfg, logger)
 
 	// 启动服务器
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)

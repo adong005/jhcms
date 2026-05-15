@@ -73,9 +73,11 @@ func registerCRUDRoutes(group *gin.RouterGroup, handlers CRUDHandlers) {
 }
 
 // Setup 设置路由
-func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
+func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, appLogger *zap.Logger) {
 	middleware.SetTenantDB(db)
-	middleware.StartLogConsumer(db, zap.L())
+	if appLogger == nil {
+		appLogger = zap.L()
+	}
 
 	// 初始化 Repository
 	userRepo := repository.NewUserRepository(db)
@@ -145,7 +147,7 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	authorized := api.Group("")
 	authorized.Use(middleware.AuthMiddleware())
 	authorized.Use(middleware.TenantMiddleware())
-	authorized.Use(middleware.OperationLogMiddleware(db))
+	authorized.Use(middleware.OperationLogMiddleware(db, appLogger))
 	{
 		// 获取用户信息和权限码
 		authorized.GET("/auth/codes", authHandler.GetAccessCodes)

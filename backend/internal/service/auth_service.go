@@ -41,12 +41,15 @@ type UserInfo struct {
 	Avatar   string `json:"avatar"`
 }
 
-// TokenClaims JWT claims
+// TokenClaims JWT claims（字段需与 internal/pkg/jwt.Claims 的 JSON 标签对齐，供 AuthMiddleware 解析）
 type TokenClaims struct {
-	UserID               string `json:"user_id"`
-	Username             string `json:"username"`
-	Role                 string `json:"role"`
-	IsPlatformSuperAdmin bool   `json:"is_platform_super_admin"`
+	UserID               string  `json:"user_id"`
+	Username             string  `json:"username"`
+	Role                 string  `json:"role"`
+	TenantID             string  `json:"tenant_id,omitempty"`
+	IsAdmin              bool    `json:"is_admin"`
+	IsPlatformSuperAdmin bool    `json:"is_platform_super_admin,omitempty"`
+	ParentID             *string `json:"parent_id,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -206,35 +209,38 @@ func (s *AuthService) generateTokens(user *model.User) (accessToken, refreshToke
 	refreshExpire := now.Add(time.Duration(s.config.JWT.RefreshTokenExpire) * time.Second)
 
 	isSuperAdmin := user.Role == "super_admin"
+	isAdmin := user.IsAdmin || isSuperAdmin
 
-	// Access Token
-	accessClaims := TokenClaims{
+	claimBase := TokenClaims{
 		UserID:               user.ID,
 		Username:             user.Username,
 		Role:                 user.Role,
+		TenantID:             user.TenantID(),
+		IsAdmin:              isAdmin,
 		IsPlatformSuperAdmin: isSuperAdmin,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(accessExpire),
-			IssuedAt:  jwt.NewNumericDate(now),
-		},
+		ParentID:             user.ParentID,
 	}
-	accessToken, err = jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims).SignedString([]byte(s.config.JWT.Secret))
+
+	// Access Token
+	accessClaims := claimBase
+	accessClaims.RegisteredClaims = jwt.RegisteredClaims{
+		ExpiresAt: jwt.NewNumericDate(accessExpire),
+		IssuedAt:  jwt.NewNumericDate(now),
+		NotBefore: jwt.NewNumericDate(now),
+	}
+	accessToken, err = jwt.NewWithClaims(jwt.SigningMethodHS256, &accessClaims).SignedString([]byte(s.config.JWT.Secret))
 	if err != nil {
 		return "", "", 0, err
 	}
 
 	// Refresh Token
-	refreshClaims := TokenClaims{
-		UserID:               user.ID,
-		Username:             user.Username,
-		Role:                 user.Role,
-		IsPlatformSuperAdmin: isSuperAdmin,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(refreshExpire),
-			IssuedAt:  jwt.NewNumericDate(now),
-		},
+	refreshClaims := claimBase
+	refreshClaims.RegisteredClaims = jwt.RegisteredClaims{
+		ExpiresAt: jwt.NewNumericDate(refreshExpire),
+		IssuedAt:  jwt.NewNumericDate(now),
+		NotBefore: jwt.NewNumericDate(now),
 	}
-	refreshToken, err = jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims).SignedString([]byte(s.config.JWT.Secret))
+	refreshToken, err = jwt.NewWithClaims(jwt.SigningMethodHS256, &refreshClaims).SignedString([]byte(s.config.JWT.Secret))
 	if err != nil {
 		return "", "", 0, err
 	}

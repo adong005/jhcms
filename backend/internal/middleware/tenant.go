@@ -53,6 +53,15 @@ func TenantMiddleware() gin.HandlerFunc {
 			}
 		}
 
+		// 再兜底：path 为 "/" 的超管等场景 JWT 可能无 tenant_id
+		tidVal, _ := c.Get("tenant_id")
+		tidStr, _ := tidVal.(string)
+		if strings.TrimSpace(tidStr) == "" {
+			if superAdmin, _ := c.Get("is_platform_super_admin"); superAdmin == true {
+				c.Set("tenant_id", ids.DefaultTenantUUID)
+			}
+		}
+
 		c.Next()
 	}
 }

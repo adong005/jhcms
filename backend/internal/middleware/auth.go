@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"adcms-backend/internal/pkg/ids"
 	"adcms-backend/internal/pkg/jwt"
 	"adcms-backend/internal/pkg/response"
 	"strings"
@@ -35,7 +36,11 @@ func AuthMiddleware() gin.HandlerFunc {
 		c.Set("user_id", claims.UserID)
 		c.Set("username", claims.Username)
 		c.Set("role", claims.Role)
-		c.Set("tenant_id", claims.TenantID)
+		tenantID := claims.TenantID
+		if tenantID == "" && claims.Role == "super_admin" {
+			tenantID = ids.DefaultTenantUUID
+		}
+		c.Set("tenant_id", tenantID)
 		isAdmin := claims.IsAdmin || claims.LegacySuperAdmin
 		c.Set("is_admin", isAdmin)
 		c.Set("is_platform_super_admin", isAdmin)
